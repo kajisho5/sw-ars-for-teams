@@ -1,0 +1,340 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>PULSE</title>
+    <script src="https://res.cdn.office.net/teams-js/2.19.0/js/MicrosoftTeams.min.js" crossorigin="anonymous"></script>
+    <style>
+      :root {
+        --accent: #10b981;
+        --accent-dark: #0d9268;
+        --bg: #ffffff;
+        --panel: #f7f7fb;
+        --text: #1f1f2e;
+        --muted: #6b6b80;
+        --border: #e2e2ee;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Noto Sans JP", sans-serif;
+        color: var(--text);
+        background: var(--bg);
+        font-size: 14px;
+      }
+      /* Teamsのテーマ(ライト/ダーク/ハイコントラスト)に追従 */
+      body.theme-dark {
+        --bg: #1f1f1f; --panel: #292929; --text: #f5f5f5; --muted: #a0a0a0; --border: #3d3d3d;
+      }
+      body.theme-contrast {
+        --bg: #000000; --panel: #000000; --text: #ffffff; --muted: #ffff00; --border: #ffffff;
+      }
+      #app { padding: 20px; max-width: 720px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+      h1 { font-size: 20px; margin: 0; color: var(--accent-dark); }
+      body.theme-dark h1, body.theme-contrast h1 { color: var(--accent); }
+      h2 { font-size: 16px; margin: 0 0 8px; }
+      h3 { font-size: 14px; margin: 0; }
+      p.muted, .muted { color: var(--muted); }
+      input, button {
+        font-family: inherit; font-size: 14px; padding: 9px 12px; border-radius: 8px; border: 1px solid var(--border);
+      }
+      input { width: 100%; background: var(--bg); color: var(--text); }
+      button { background: var(--bg); color: var(--text); cursor: pointer; }
+      button.primary { background: var(--accent); color: white; border-color: var(--accent); font-weight: 600; }
+      button.primary:hover { background: var(--accent-dark); }
+      button:disabled { opacity: 0.5; cursor: default; }
+      .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+      .row { display: flex; gap: 8px; align-items: center; }
+      .session-header { display: flex; flex-direction: column; gap: 6px; }
+      .badge { font-size: 12px; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }
+      .badge.live { background: var(--accent); color: white; border-color: var(--accent); }
+      .result-bar { position: relative; background: rgba(16,185,129,.12); border-radius: 6px; overflow: hidden; height: 26px; margin: 6px 0; }
+      .result-bar-fill { position: absolute; inset: 0; background: rgba(16,185,129,.32); }
+      .result-bar-label { position: relative; z-index: 1; display: flex; justify-content: space-between; padding: 0 10px; font-size: 13px; line-height: 26px; }
+      .question-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+      .question-row:last-child { border-bottom: none; }
+      .question-row.answered { opacity: 0.55; }
+      .wordcloud-preview canvas { width: 100%; border-radius: 8px; border: 1px solid var(--border); }
+      .error-banner { background: #fdeceb; color: #c0392b; border: 1px solid #f2c1bb; border-radius: 8px; padding: 10px; font-size: 13px; }
+      body.theme-dark .error-banner { background: #3a1f1f; color: #ff9b8f; border-color: #5a2b2b; }
+    </style>
+  </head>
+  <body>
+    <div id="app">読み込み中…</div>
+    <script>
+      // PULSE (sw-ars.com) の /api/admin/state をポーリングして表示するだけの、
+      // 読み取り専用のTeamsタブ(個人/チーム/会議)。PowerPoint版・Google Slides版
+      // (kajisho5/sw-ars-for-powerpoint, kajisho5/sw-ars-for-googleslides) と同じ
+      // PULSE APIを使う。Teamsにはスライド/ドキュメントへの「挿入」に相当する操作が
+      // 無いため、このタブはライブ結果を表示するだけの薄いビューア。
+      var PULSE_BASE = "https://sw-ars.com";
+      var STORAGE_KEY = "sw-ars-teams:connection";
+      var PHASE_LABEL = {
+        idle: "待機中", preview: "画面表示中", open: "出題中", closed: "締切",
+        results: "結果表示中", reveal: "正解発表", ranking: "ランキング",
+        survey: "アンケート", lottery: "抽選中", compare: "比較",
+      };
+      var PALETTE = ["#10b981", "#0d9268", "#34d399", "#065f46", "#6ee7b7"];
+
+      var state = { connecting: false };
+      var pollTimer;
+      var app = document.getElementById("app");
+
+      function el(tag, attrs, children) {
+        var node = document.createElement(tag);
+        attrs = attrs || {};
+        for (var k in attrs) node.setAttribute(k, attrs[k]);
+        (children || []).forEach(function (c) { node.append(c); });
+        return node;
+      }
+
+      function loadConnection() {
+        try {
+          var raw = localStorage.getItem(STORAGE_KEY);
+          if (!raw) return undefined;
+          var parsed = JSON.parse(raw);
+          if (typeof parsed.room === "string" && typeof parsed.key === "string") return parsed;
+          return undefined;
+        } catch (e) { return undefined; }
+      }
+      function saveConnection(c) { localStorage.setItem(STORAGE_KEY, JSON.stringify(c)); }
+      function clearConnection() { localStorage.removeItem(STORAGE_KEY); }
+
+      function fetchRoomState(connection) {
+        var url = PULSE_BASE + "/api/admin/state?r=" + encodeURIComponent(connection.room) + "&key=" + encodeURIComponent(connection.key);
+        return fetch(url).then(function (res) {
+          if (res.status === 401) { var e = new Error("auth"); e.isAuthError = true; throw e; }
+          if (!res.ok) throw new Error("request_failed_" + res.status);
+          return res.json();
+        });
+      }
+
+      function startPolling() {
+        stopPolling();
+        poll();
+        pollTimer = setInterval(poll, 3000);
+      }
+      function stopPolling() { if (pollTimer) clearInterval(pollTimer); pollTimer = undefined; }
+
+      function poll() {
+        if (!state.connection) return;
+        fetchRoomState(state.connection).then(function (roomState) {
+          state.roomState = roomState;
+          state.error = undefined;
+          render();
+        }).catch(function (err) {
+          if (err.isAuthError) {
+            stopPolling();
+            clearConnection();
+            state.connection = undefined;
+            state.roomState = undefined;
+            state.error = "ルーム名または鍵が正しくありません。もう一度接続してください。";
+          } else {
+            state.error = err.message || String(err);
+          }
+          render();
+        });
+      }
+
+      function connect(room, key) {
+        if (!room.trim() || !key.trim()) { state.error = "ルーム名と鍵を入力してください"; render(); return; }
+        state.connecting = true;
+        state.error = undefined;
+        render();
+        var connection = { room: room.trim(), key: key.trim() };
+        fetchRoomState(connection).then(function (roomState) {
+          state.connection = connection;
+          state.roomState = roomState;
+          saveConnection(connection);
+          startPolling();
+        }).catch(function (err) {
+          state.error = err.isAuthError ? "ルーム名または鍵が正しくありません" : (err.message || String(err));
+        }).finally(function () {
+          state.connecting = false;
+          render();
+        });
+      }
+
+      function disconnect() {
+        stopPolling();
+        clearConnection();
+        state.connection = undefined;
+        state.roomState = undefined;
+        state.error = undefined;
+        render();
+      }
+
+      function activeQuestion(roomState) {
+        if (!roomState.cur) return undefined;
+        for (var i = 0; i < roomState.questions.length; i++) if (roomState.questions[i].id === roomState.cur) return roomState.questions[i];
+        return undefined;
+      }
+
+      function renderWordCloudCanvas(words, width, height) {
+        width = width || 640; height = height || 220;
+        var canvas = document.createElement("canvas");
+        canvas.width = width; canvas.height = height;
+        var ctx = canvas.getContext("2d");
+        ctx.fillStyle = getComputedStyle(document.body).getPropertyValue("--panel") || "#ffffff";
+        ctx.fillRect(0, 0, width, height);
+        if (words.length === 0) {
+          ctx.fillStyle = "#8a8aa3"; ctx.font = "20px sans-serif"; ctx.textAlign = "center";
+          ctx.fillText("まだ回答がありません", width / 2, height / 2);
+          return canvas;
+        }
+        var counts = words.map(function (w) { return w.count; });
+        var maxCount = Math.max.apply(null, counts), minCount = Math.min.apply(null, counts);
+        var minFont = 16, maxFont = 56;
+        function fontFor(count) {
+          if (maxCount === minCount) return (minFont + maxFont) / 2;
+          return minFont + ((count - minCount) / (maxCount - minCount)) * (maxFont - minFont);
+        }
+        var top = words.slice().sort(function (a, b) { return b.count - a.count; }).slice(0, 60);
+        ctx.textBaseline = "middle"; ctx.textAlign = "left";
+        var padding = 20, x = padding, y = padding + maxFont / 2, lineGap = 12, rowMaxFont = 0;
+        for (var i = 0; i < top.length; i++) {
+          var word = top[i];
+          var fontSize = fontFor(word.count);
+          ctx.font = (i < 3 ? "700" : "600") + " " + fontSize + 'px -apple-system, "Segoe UI", "Hiragino Sans", "Noto Sans JP", sans-serif';
+          var metrics = ctx.measureText(word.text);
+          var wordWidth = metrics.width + 18;
+          if (x + wordWidth > width - padding) { x = padding; y += rowMaxFont + lineGap; rowMaxFont = 0; }
+          if (y + fontSize > height - padding) break;
+          ctx.fillStyle = PALETTE[i % PALETTE.length];
+          ctx.fillText(word.text, x, y);
+          x += wordWidth;
+          rowMaxFont = Math.max(rowMaxFont, fontSize);
+        }
+        return canvas;
+      }
+
+      function render() {
+        app.innerHTML = "";
+        app.append(el("h1", {}, ["PULSE"]));
+        if (state.error) app.append(el("div", { class: "error-banner" }, [state.error]));
+
+        if (!state.connection || !state.roomState) {
+          app.append(renderConnectPanel());
+          return;
+        }
+        app.append(renderStatusHeader(state.connection, state.roomState));
+        app.append(renderQuestionPanel(state.roomState));
+        if (state.roomState.qnaEnabled) app.append(renderQnaPanel(state.roomState));
+      }
+
+      function renderConnectPanel() {
+        var panel = el("div", { class: "panel" });
+        panel.append(el("h2", {}, ["PULSE に接続"]));
+        panel.append(el("p", { class: "muted" }, [
+          "PULSE の管理画面で対象イベントの「閲覧専用リンク」を開き、URL の r= の値をルーム名、key= の値を鍵として入力してください。",
+        ]));
+        var roomInput = el("input", { placeholder: "ルーム名（例: CRAFT2026）" });
+        var keyInput = el("input", { type: "password", placeholder: "閲覧用の鍵（viewKey）" });
+        var button = el("button", { class: "primary" }, [state.connecting ? "接続中…" : "接続する"]);
+        button.disabled = state.connecting;
+        button.addEventListener("click", function () { connect(roomInput.value, keyInput.value); });
+        var row = el("div", { class: "row" }, [roomInput]);
+        panel.append(row, keyInput, button);
+        return panel;
+      }
+
+      function renderStatusHeader(connection, roomState) {
+        var panel = el("div", { class: "panel session-header" });
+        var row = el("div", { class: "row" });
+        row.append(el("h2", {}, [connection.room]));
+        row.append(el("span", { class: "badge live" }, [PHASE_LABEL[roomState.phase] || roomState.phase]));
+        panel.append(row);
+        panel.append(el("p", { class: "muted" }, ["接続中の参加者: " + roomState.online + "人"]));
+        var disconnectBtn = el("button", {}, ["接続を解除"]);
+        disconnectBtn.addEventListener("click", disconnect);
+        panel.append(disconnectBtn);
+        return panel;
+      }
+
+      function renderQuestionPanel(roomState) {
+        var panel = el("div", { class: "panel" });
+        panel.append(el("h2", {}, ["現在の設問"]));
+        var question = activeQuestion(roomState);
+        if (!question) {
+          panel.append(el("p", { class: "muted" }, ["現在アクティブな設問はありません。"]));
+          return panel;
+        }
+        panel.append(el("h3", {}, [question.text]));
+        if (question.qtype === "text") {
+          var words = (question.topTexts || []).map(function (e) { return { text: e[0], count: e[1] }; });
+          panel.append(el("p", { class: "muted" }, [question.n + " 件の回答"]));
+          var preview = el("div", { class: "wordcloud-preview" });
+          preview.append(renderWordCloudCanvas(words));
+          panel.append(preview);
+        } else {
+          var total = question.n || 0;
+          question.choices.forEach(function (label, i) {
+            var count = (question.counts && question.counts[i]) || 0;
+            var pct = total > 0 ? Math.round((count / total) * 100) : 0;
+            var bar = el("div", { class: "result-bar" });
+            bar.append(el("span", { class: "result-bar-fill", style: "width:" + pct + "%" }));
+            bar.append(el("span", { class: "result-bar-label" }, [label, count + "票 (" + pct + "%)"]));
+            panel.append(bar);
+          });
+          panel.append(el("p", { class: "muted" }, ["合計 " + total + " 件の回答"]));
+        }
+        return panel;
+      }
+
+      function renderQnaPanel(roomState) {
+        var panel = el("div", { class: "panel" });
+        panel.append(el("h2", {}, ["Q&A"]));
+        var visible = roomState.qnaItems.filter(function (q) { return !q.hidden && !q.pending; });
+        if (visible.length === 0) {
+          panel.append(el("p", { class: "muted" }, ["まだ質問がありません。"]));
+          return panel;
+        }
+        visible.slice(0, 10).forEach(function (q) {
+          var row = el("div", { class: "question-row" + (q.answered ? " answered" : "") });
+          row.append(el("span", {}, [q.text + "（▲" + q.votes + "）"]));
+          panel.append(row);
+        });
+        return panel;
+      }
+
+      function applyTeamsTheme(theme) {
+        document.body.classList.remove("theme-dark", "theme-contrast");
+        if (theme === "dark") document.body.classList.add("theme-dark");
+        else if (theme === "contrast") document.body.classList.add("theme-contrast");
+      }
+
+      function init() {
+        // config.html でチーム/会議タブとして追加された場合、contentUrlのクエリに
+        // ルーム名・鍵が付与されて渡ってくるので、あれば自動接続する
+        var params = new URLSearchParams(location.search);
+        var qRoom = params.get("room"), qKey = params.get("key");
+        if (qRoom && qKey) {
+          state.connection = { room: qRoom, key: qKey };
+          saveConnection(state.connection);
+          startPolling();
+        } else {
+          var saved = loadConnection();
+          if (saved) { state.connection = saved; startPolling(); }
+        }
+        render();
+      }
+
+      if (window.microsoftTeams) {
+        microsoftTeams.app.initialize().then(function () {
+          microsoftTeams.app.getContext().then(function (ctx) {
+            applyTeamsTheme(ctx.app && ctx.app.theme);
+          });
+          microsoftTeams.app.registerOnThemeChangeHandler(applyTeamsTheme);
+          microsoftTeams.app.notifySuccess();
+          init();
+        }).catch(function () {
+          // Teams外（通常ブラウザでの動作確認等）でも普通に動くようにする
+          init();
+        });
+      } else {
+        init();
+      }
+    </script>
+  </body>
+</html>
