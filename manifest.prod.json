@@ -1,0 +1,62 @@
+{
+  "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.19/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.19",
+  "version": "1.0.0",
+  "id": "90acfa51-a56d-4f25-9a68-83a3aa6c6148",
+  "developer": {
+    "name": "SEVENTHWELL",
+    "websiteUrl": "https://sw-ars.com",
+    "privacyUrl": "https://sw-ars.com/privacy",
+    "termsOfUseUrl": "https://sw-ars.com/terms"
+  },
+  "icons": {
+    "color": "color.png",
+    "outline": "outline.png"
+  },
+  "name": {
+    "short": "PULSE",
+    "full": "PULSE for Microsoft Teams"
+  },
+  "description": {
+    "short": "PULSEのライブ投票・Q&A結果をTeams上で表示",
+    "full": "PULSE(sw-ars.com)のイベント(ルーム)に接続し、ライブ投票・Q&Aの結果をTeamsの個人タブ・チームタブ・会議中タブでリアルタイムに表示します。進行操作自体は引き続きPULSEの管理画面(https://sw-ars.com/admin)で行います。"
+  },
+  "accentColor": "#10b981",
+  "staticTabs": [
+    {
+      "entityId": "pulse-viewer",
+      "name": "PULSE",
+      "contentUrl": "https://sw-ars.com/integrations/teams/index.html",
+      "websiteUrl": "https://sw-ars.com",
+      "scopes": [
+        "personal"
+      ]
+    }
+  ],
+  "configurableTabs": [
+    {
+      "configurationUrl": "https://sw-ars.com/integrations/teams/config.html",
+      "canUpdateConfiguration": true,
+      "scopes": [
+        "team",
+        "groupChat",
+        "meetings"
+      ],
+      "context": [
+        "channelTab",
+        "privateChatTab",
+        "meetingChatTab",
+        "meetingDetailsTab",
+        "meetingSidePanel",
+        "meetingStage"
+      ]
+    }
+  ],
+  "permissions": [
+    "identity",
+    "messageTeamMembers"
+  ],
+  "validDomains": [
+    "sw-ars.com"
+  ]
+}
