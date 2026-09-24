@@ -52,10 +52,7 @@
       ]
     }
   ],
-  "permissions": [
-    "identity",
-    "messageTeamMembers"
-  ],
+  "permissions": [],
   "validDomains": [
     "sw-ars.com"
   ]
