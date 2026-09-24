@@ -4,6 +4,10 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>PULSE を追加</title>
+    <link rel="icon" href="/favicon.ico" sizes="32x32" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/icon-16.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/icon-32.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <script src="https://res.cdn.office.net/teams-js/2.19.0/js/MicrosoftTeams.min.js" crossorigin="anonymous"></script>
     <style>
       body {
@@ -14,18 +18,27 @@
       p.muted { color: #6b6b80; margin: 0 0 16px; }
       label { display: block; font-weight: 600; margin-bottom: 4px; }
       input { width: 100%; padding: 9px 12px; border-radius: 8px; border: 1px solid #e2e2ee; font-size: 14px; margin-bottom: 14px; box-sizing: border-box; }
+      .key-row { display: flex; gap: 8px; align-items: flex-start; flex-wrap: wrap; }
+      .key-row input { flex: 1; min-width: 120px; }
+      .key-row button { flex: 0 0 auto; padding: 9px 12px; border-radius: 8px; border: 1px solid #e2e2ee; background: #fff; font-size: 13px; cursor: pointer; }
+      .admin-back-link { display: inline-block; margin-bottom: 12px; font-size: 12.5px; font-weight: 600; color: #0d9268; text-decoration: none; }
+      .admin-back-link:hover { text-decoration: underline; }
     </style>
   </head>
   <body>
+    <a class="admin-back-link" href="https://sw-ars.com/admin" target="_blank" rel="noreferrer">&larr; PULSE管理画面(/admin)を開く</a>
     <h1>PULSE をこのチャネル・会議に追加</h1>
     <p class="muted">
       PULSE の管理画面で対象イベントの「閲覧専用リンク」を開き、URL の r= の値をルーム名、key= の値を鍵として入力してください。
       あとで「保存」から変更できます。
     </p>
     <label for="room">ルーム名</label>
-    <input id="room" placeholder="例: CRAFT2026" />
+    <input id="room" placeholder="" />
     <label for="key">閲覧用の鍵（viewKey）</label>
-    <input id="key" type="password" />
+    <div class="key-row">
+      <input id="key" type="password" />
+      <button type="button" id="keyToggle" aria-label="鍵の表示切り替え">表示</button>
+    </div>
 
     <script>
       var CONTENT_URL_BASE = location.origin + location.pathname.replace(/config\.html$/, "index.html");
@@ -43,7 +56,9 @@
           }).then(function () {
             saveEvent.notifySuccess();
           }).catch(function (err) {
-            saveEvent.notifyFailure(err && err.message ? err.message : String(err));
+            // Teams が利用者に表示する文言なので、例外の英語メッセージは渡さず console に残す
+            console.error("[PULSE] タブの設定の保存に失敗", err);
+            saveEvent.notifyFailure("タブの設定を保存できませんでした。もう一度お試しください");
           });
         });
 
@@ -54,6 +69,30 @@
         }
         document.getElementById("room").addEventListener("input", updateValidity);
         document.getElementById("key").addEventListener("input", updateValidity);
+
+        // 長いランダム文字列の確認・訂正がしづらいので表示/非表示を切り替えられるようにする
+        // (design-improvements.md #534)
+        document.getElementById("keyToggle").addEventListener("click", function () {
+          var keyEl = document.getElementById("key");
+          var showing = keyEl.type === "text";
+          keyEl.type = showing ? "password" : "text";
+          this.textContent = showing ? "表示" : "非表示";
+        });
+
+        // 既存のタブを「編集」で開き直した時、room/keyが常に空欄に戻ってしまっていた
+        // (design-improvements.md #533)。現在のcontentUrlから復元して入力欄に反映する
+        microsoftTeams.pages.getConfig().then(function (instanceConfig) {
+          if (!instanceConfig || !instanceConfig.contentUrl) return;
+          try {
+            var currentUrl = new URL(instanceConfig.contentUrl);
+            var room = currentUrl.searchParams.get("room") || "";
+            var key = currentUrl.searchParams.get("key") || "";
+            if (room) document.getElementById("room").value = room;
+            if (key) document.getElementById("key").value = key;
+          } catch (e) { /* 新規追加時はcontentUrl未設定なのでここに来る */ }
+          updateValidity();
+        }).catch(function () {});
+
         updateValidity();
       });
     </script>

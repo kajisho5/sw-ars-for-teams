@@ -4,6 +4,10 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>PULSE</title>
+    <link rel="icon" href="/favicon.ico" sizes="32x32" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/icon-16.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/icon-32.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <script src="https://res.cdn.office.net/teams-js/2.19.0/js/MicrosoftTeams.min.js" crossorigin="anonymous"></script>
     <style>
       :root {
@@ -45,7 +49,7 @@
       button.primary:hover { background: var(--accent-dark); }
       button:disabled { opacity: 0.5; cursor: default; }
       .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
-      .row { display: flex; gap: 8px; align-items: center; }
+      .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
       .session-header { display: flex; flex-direction: column; gap: 6px; }
       .badge { font-size: 12px; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }
       .badge.live { background: var(--accent); color: white; border-color: var(--accent); }
@@ -58,9 +62,15 @@
       .wordcloud-preview canvas { width: 100%; border-radius: 8px; border: 1px solid var(--border); }
       .error-banner { background: #fdeceb; color: #c0392b; border: 1px solid #f2c1bb; border-radius: 8px; padding: 10px; font-size: 13px; }
       body.theme-dark .error-banner { background: #3a1f1f; color: #ff9b8f; border-color: #5a2b2b; }
+      .admin-back-link {
+        display: inline-block; margin-bottom: 12px; font-size: 12.5px; font-weight: 600;
+        color: var(--accent-dark); text-decoration: none;
+      }
+      .admin-back-link:hover { text-decoration: underline; }
     </style>
   </head>
   <body>
+    <a class="admin-back-link" href="https://sw-ars.com/admin" target="_blank" rel="noreferrer">&larr; PULSE管理画面(/admin)を開く</a>
     <div id="app">読み込み中…</div>
     <script>
       // PULSE (sw-ars.com) の /api/admin/state をポーリングして表示するだけの、
@@ -76,6 +86,33 @@
         survey: "アンケート", lottery: "抽選中", compare: "比較",
       };
       var PALETTE = ["#10b981", "#0d9268", "#34d399", "#065f46", "#6ee7b7"];
+
+      // 利用者に見せるエラー文言。"request_failed_503" や "Failed to fetch" のような内部コード・
+      // 例外の英語メッセージは画面に出さず、ここで日本語に変換する（技術的な詳細は console に残す）。
+      // 文言は PULSE 本体の閲覧専用ビュー（web/view）と揃え、4つの連携アプリ
+      // （PowerPoint・Teams・Zoom・Google Slides）でも同じものを使う。
+      var ERROR_MESSAGES = {
+        auth: "ルーム名または鍵が正しくありません。もう一度接続してください。",
+        notFound: "イベントが見つかりません。ルーム名をご確認ください",
+        rateLimited: "アクセスが集中しています。少し待ってからもう一度お試しください",
+        server: "サーバー側でエラーが発生しています。しばらくしてからもう一度お試しください",
+        network: "通信に失敗しました。回線状況をご確認のうえ、しばらくしてからもう一度お試しください",
+        unknown: "エラーが発生しました。しばらくしてからもう一度お試しください",
+      };
+      // PULSE との通信エラーを日本語の文言に変換する
+      function describeError(err) {
+        console.error("[PULSE] 通信エラー", err);
+        var status = err && err.status;
+        if ((err && err.isAuthError) || status === 401) return ERROR_MESSAGES.auth;
+        if (status === 404) return ERROR_MESSAGES.notFound;
+        if (status === 429) return ERROR_MESSAGES.rateLimited;
+        if (status) return ERROR_MESSAGES.server;
+        // 応答がJSONとして読めない（障害時のエラーページ等）はサーバー側の問題として扱う
+        if (err instanceof SyntaxError) return ERROR_MESSAGES.server;
+        // fetch 自体の失敗（"Failed to fetch" 等）は TypeError になる
+        if (err instanceof TypeError) return ERROR_MESSAGES.network;
+        return ERROR_MESSAGES.unknown;
+      }
 
       var state = { connecting: false };
       var pollTimer;
@@ -105,7 +142,7 @@
         var url = PULSE_BASE + "/api/admin/state?r=" + encodeURIComponent(connection.room) + "&key=" + encodeURIComponent(connection.key);
         return fetch(url).then(function (res) {
           if (res.status === 401) { var e = new Error("auth"); e.isAuthError = true; throw e; }
-          if (!res.ok) throw new Error("request_failed_" + res.status);
+          if (!res.ok) { var fe = new Error("request_failed_" + res.status); fe.status = res.status; throw fe; }
           return res.json();
         });
       }
@@ -131,7 +168,7 @@
             state.roomState = undefined;
             state.error = "ルーム名または鍵が正しくありません。もう一度接続してください。";
           } else {
-            state.error = err.message || String(err);
+            state.error = describeError(err);
           }
           render();
         });
@@ -149,7 +186,7 @@
           saveConnection(connection);
           startPolling();
         }).catch(function (err) {
-          state.error = err.isAuthError ? "ルーム名または鍵が正しくありません" : (err.message || String(err));
+          state.error = err.isAuthError ? "ルーム名または鍵が正しくありません" : describeError(err);
         }).finally(function () {
           state.connecting = false;
           render();
@@ -229,13 +266,22 @@
         panel.append(el("p", { class: "muted" }, [
           "PULSE の管理画面で対象イベントの「閲覧専用リンク」を開き、URL の r= の値をルーム名、key= の値を鍵として入力してください。",
         ]));
-        var roomInput = el("input", { placeholder: "ルーム名（例: CRAFT2026）" });
-        var keyInput = el("input", { type: "password", placeholder: "閲覧用の鍵（viewKey）" });
+        var roomInput = el("input", { placeholder: "ルーム名" });
+        var keyInput = el("input", { type: "password", placeholder: "閲覧用の鍵（viewKey）", style: "flex:1;width:auto" });
+        // 長いランダム文字列の確認・訂正がしづらかったので、表示/非表示切り替えを追加
+        // (design-improvements.md #534)
+        var keyToggleBtn = el("button", { type: "button", "aria-label": "鍵の表示切り替え" }, ["表示"]);
+        keyToggleBtn.addEventListener("click", function () {
+          var showing = keyInput.type === "text";
+          keyInput.type = showing ? "password" : "text";
+          keyToggleBtn.textContent = showing ? "表示" : "非表示";
+        });
+        var keyRow = el("div", { class: "row" }, [keyInput, keyToggleBtn]);
         var button = el("button", { class: "primary" }, [state.connecting ? "接続中…" : "接続する"]);
         button.disabled = state.connecting;
         button.addEventListener("click", function () { connect(roomInput.value, keyInput.value); });
         var row = el("div", { class: "row" }, [roomInput]);
-        panel.append(row, keyInput, button);
+        panel.append(row, keyRow, button);
         return panel;
       }
 
