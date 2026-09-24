@@ -7,11 +7,25 @@ PULSE 本体（イベント作成・投影スクリーン・参加者ページ�
 ## 構成
 
 ```
-manifest.json   Teamsアプリマニフェスト（静的個人タブ + チーム/会議用の構成可能タブ）
-index.html      タブ本体（接続フォーム・3秒間隔ポーリング・結果描画）
-config.html     チーム/会議にタブを追加する時の設定画面（ルーム名・鍵を先に入力しておける）
-icons/          color.png(192x192)・outline.png(32x32) のプレースホルダーアイコン
+manifest.json       Teamsアプリマニフェスト（静的個人タブ + チーム/会議用の構成可能タブ。ホスト先は YOUR-HOSTING-DOMAIN のまま）
+manifest.prod.json  本番用マニフェスト（ホスト先を sw-ars.com/integrations/teams/ にしたもの）
+index.html          タブ本体（接続フォーム・3秒間隔ポーリング・結果描画）
+config.html         チーム/会議にタブを追加する時の設定画面（ルーム名・鍵を先に入力しておける）
+icons/              color.png(192x192)・outline.png(32x32) のアプリアイコン（PULSE のブランドアイコン）
 ```
+
+### 本番の配信元について
+
+本番（`https://sw-ars.com/integrations/teams/`）で配信しているのは、このリポジトリのファイルそのものではなく、PULSE 本体（`kajisho5/sw-ars`）の `src/pages/integration-assets.js` に文字列として埋め込んだ複製です。
+
+| このリポジトリ | PULSE 本体の定数 |
+| --- | --- |
+| `index.html` | `TEAMS_INDEX_HTML` |
+| `config.html` | `TEAMS_CONFIG_HTML` |
+| `manifest.prod.json` | `TEAMS_MANIFEST_JSON`（`TEAMS_APP_ZIP_B64` の zip 内の `manifest.json` も同じ内容） |
+| `icons/color.png`・`icons/outline.png` | `TEAMS_ICON_COLOR_B64`・`TEAMS_ICON_OUTLINE_B64`（zip 内の画像も同じ） |
+
+**変更するときは、このリポジトリと PULSE 本体の埋め込みの両方に同じ差分を当ててください。** 片方だけを直すと、あとでもう片方の内容で丸ごと差し替えたときに改修が消えます。
 
 ```
 PULSE (sw-ars.com, Cloudflare Workers + Durable Objects)
@@ -51,6 +65,6 @@ npx http-server . -p 3000 --ssl -c-1
 ## 本番運用・組織配布に向けて
 
 - `manifest.json` の `id` は仮の GUID を割り当て済みです。組織固有のものに差し替える場合は新しい GUID を発行してください。
-- `icons/color.png` / `icons/outline.png` は現状プレースホルダーです。実際のロゴに差し替えてください（outline は透明背景に白いシルエットである必要があります）。
+- `icons/color.png` / `icons/outline.png` は PULSE のブランドアイコンです。差し替える場合、outline は透明背景に白いシルエットである必要があります。
 - Microsoft Teams Store（AppSource）への公開を目指す場合は、[Teams アプリの公開手順](https://learn.microsoft.com/microsoftteams/platform/concepts/deploy-and-publish/appsource/publish) と審査要件（アクセシビリティ・プライバシーポリシー等）を確認してください。
 - 現状は読み取り専用ビューアですが、Bot Framework と組み合わせて「チャットに結果を投稿する」「会議中に自動でリマインドする」等の拡張も可能です。
