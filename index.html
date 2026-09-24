@@ -77,6 +77,33 @@
       };
       var PALETTE = ["#10b981", "#0d9268", "#34d399", "#065f46", "#6ee7b7"];
 
+      // 利用者に見せるエラー文言。"request_failed_503" や "Failed to fetch" のような内部コード・
+      // 例外の英語メッセージは画面に出さず、ここで日本語に変換する（技術的な詳細は console に残す）。
+      // 文言は PULSE 本体の閲覧専用ビュー（web/view）と揃え、4つの連携アプリ
+      // （PowerPoint・Teams・Zoom・Google Slides）でも同じものを使う。
+      var ERROR_MESSAGES = {
+        auth: "ルーム名または鍵が正しくありません。もう一度接続してください。",
+        notFound: "イベントが見つかりません。ルーム名をご確認ください",
+        rateLimited: "アクセスが集中しています。少し待ってからもう一度お試しください",
+        server: "サーバー側でエラーが発生しています。しばらくしてからもう一度お試しください",
+        network: "通信に失敗しました。回線状況をご確認のうえ、しばらくしてからもう一度お試しください",
+        unknown: "エラーが発生しました。しばらくしてからもう一度お試しください",
+      };
+      // PULSE との通信エラーを日本語の文言に変換する
+      function describeError(err) {
+        console.error("[PULSE] 通信エラー", err);
+        var status = err && err.status;
+        if ((err && err.isAuthError) || status === 401) return ERROR_MESSAGES.auth;
+        if (status === 404) return ERROR_MESSAGES.notFound;
+        if (status === 429) return ERROR_MESSAGES.rateLimited;
+        if (status) return ERROR_MESSAGES.server;
+        // 応答がJSONとして読めない（障害時のエラーページ等）はサーバー側の問題として扱う
+        if (err instanceof SyntaxError) return ERROR_MESSAGES.server;
+        // fetch 自体の失敗（"Failed to fetch" 等）は TypeError になる
+        if (err instanceof TypeError) return ERROR_MESSAGES.network;
+        return ERROR_MESSAGES.unknown;
+      }
+
       var state = { connecting: false };
       var pollTimer;
       var app = document.getElementById("app");
@@ -105,7 +132,7 @@
         var url = PULSE_BASE + "/api/admin/state?r=" + encodeURIComponent(connection.room) + "&key=" + encodeURIComponent(connection.key);
         return fetch(url).then(function (res) {
           if (res.status === 401) { var e = new Error("auth"); e.isAuthError = true; throw e; }
-          if (!res.ok) throw new Error("request_failed_" + res.status);
+          if (!res.ok) { var fe = new Error("request_failed_" + res.status); fe.status = res.status; throw fe; }
           return res.json();
         });
       }
@@ -131,7 +158,7 @@
             state.roomState = undefined;
             state.error = "ルーム名または鍵が正しくありません。もう一度接続してください。";
           } else {
-            state.error = err.message || String(err);
+            state.error = describeError(err);
           }
           render();
         });
@@ -149,7 +176,7 @@
           saveConnection(connection);
           startPolling();
         }).catch(function (err) {
-          state.error = err.isAuthError ? "ルーム名または鍵が正しくありません" : (err.message || String(err));
+          state.error = err.isAuthError ? "ルーム名または鍵が正しくありません" : describeError(err);
         }).finally(function () {
           state.connecting = false;
           render();

@@ -43,7 +43,9 @@
           }).then(function () {
             saveEvent.notifySuccess();
           }).catch(function (err) {
-            saveEvent.notifyFailure(err && err.message ? err.message : String(err));
+            // Teams が利用者に表示する文言なので、例外の英語メッセージは渡さず console に残す
+            console.error("[PULSE] タブの設定の保存に失敗", err);
+            saveEvent.notifyFailure("タブの設定を保存できませんでした。もう一度お試しください");
           });
         });
 
